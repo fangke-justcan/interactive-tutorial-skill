@@ -1,114 +1,141 @@
-/* 第 5 关 · 海浪叠加 */
+/* 第 5 关 · 两个水桶：ping-pong */
 LESSONS.push({
-  id: 'layers',
-  title: '海浪叠加',
-  sub: '大波叠小波，才像自然',
-  goal: { text: '把波叠满 5 层，并让画面处于播放中。', hint: '「加一层」按五次，再点播放' },
+  id: 'pingpong',
+  title: '两个水桶：ping-pong',
+  sub: '「读自己上一帧」在硬件上的实现方式',
+  goal: { text: '单步跑 4 次乒乓循环，然后答对右侧两道问题。', hint: '绿框是正在读、金框是正在写，每帧互换' },
   notes: [
     {
-      near: '.fig', title: '你看到的两层画面',
-      html: '黄线 = 「每个横排要被搬多远」的<b>位移曲线</b>；下面的彩虹纹 = 按这条曲线<b>错位</b>后的样子。播放时曲线动一下，纹路立刻跟着搅。',
+      near: '.buckets', title: '为什么不只用一块显存',
+      html: '一块显存同一时刻只能干一件事：一边往纸上写字、一边读这行字下面的内容，读到的是<b>写了一半的乱码</b>。读写必须分开。',
     },
     {
-      near: '.add-row', title: '你叠的五层波',
-      html: '每加一层：频率 <b>×2</b>（更细）、振幅 <b>×0.45</b>（更弱）。一层是抖绳子，五层是起风的湖面。项目的 D() 水流就是这样叠了 6 层。',
+      near: '.pp-step-row', title: '你单步看到的循环',
+      html: '这一帧：<b>绿框读旧内容 → 金框写新内容 → 两个桶交换名字</b>，像乒乓球轮流。屏幕显示的是<b>刚写好</b>的那个——这也是运行器特意保证的（曾修过一帧延迟 bug）。',
     },
     {
-      near: '.add-row', title: '频率必须整数倍',
-      html: '项目代码注释特别强调：频率保持整数倍，波在画面边缘才<b>接得上</b>，否则会出现裂缝。',
+      near: '.buckets', title: '对应项目里的三行',
+      html: '读 bufTex[bufRead]、写 bufFbo[1-bufRead]、帧末 bufRead = 1-bufRead。右栏「通关讲解」里有原文。',
     },
   ],
   build(demoArea, api) {
-    const W = 320, H = 220;
-    const fig = api.el('div', 'fig');
-    demoArea.appendChild(fig);
-    const cv = api.TU.canvas(fig, W, H);
-    cv.style.width = '440px';
-    const ctx = cv.getContext('2d');
+    const W = 96, H = 64;
+    const mkBucket = name => {
+      const b = api.el('div', 'bucket');
+      b.appendChild(api.el('div', 'note-small', name));
+      const c = document.createElement('canvas');
+      c.className = 'demo'; c.width = W; c.height = H;
+      c.style.width = '150px';
+      b.appendChild(c);
+      return { b, cv: c, ctx: c.getContext('2d') };
+    };
+    const buckets = [mkBucket('桶 A'), mkBucket('桶 B')];
+    const bucketsRow = api.el('div', 'demo-grid buckets');
+    demoArea.appendChild(bucketsRow);
+    bucketsRow.appendChild(buckets[0].b);
+    bucketsRow.appendChild(api.el('div', 'note-small', '⇄<br>轮流<br>读写'));
+    bucketsRow.appendChild(buckets[1].b);
 
-    const layers = [];
-    function addLayer() {
-      const i = layers.length;
-      layers.push({ amp: 16 * Math.pow(0.45, i), freq: 1.6 * Math.pow(2, i), speed: 0.9 * Math.pow(-1.1, i), ph: i * 1.7 });
+    let data = [new Float32Array(W * H * 3), new Float32Array(W * H * 3)];
+    function seedInto(b) {
+      const a = data[b];
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const hue = (x / W + y * 0.008) % 1;
+          const o = (y * W + x) * 3;
+          a[o] = 30 + 220 * Math.abs(Math.sin(hue * 8));
+          a[o + 1] = 40 + 190 * Math.abs(Math.sin(hue * 5 + 1));
+          a[o + 2] = 70 + 180 * Math.abs(Math.cos(hue * 9));
+        }
     }
-    function disp(y, t) {
-      let s = 0;
-      for (const L of layers) s += L.amp * Math.cos(L.freq * (y / H) * Math.PI * 2 + L.speed * t + L.ph);
-      return s;
-    }
-
-    let t = 0, playing = false, timer = null;
-    api.onCleanup(() => clearInterval(timer));
-
-    function draw() {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, W, H);
-      const stripH = H / 2, y0 = stripH;
-      for (let y = 0; y < stripH; y++) {
-        const dx = Math.round(disp(y, t));
+    function warp(src, dst, f) {
+      const s = data[src], d = data[dst];
+      for (let y = 0; y < H; y++) {
+        const dx = Math.round(2.5 * Math.sin(y * 0.15 + f * 0.5));
         for (let x = 0; x < W; x++) {
           const sx = ((x - dx) % W + W) % W;
-          const hue = sx / W * 300;
-          ctx.fillStyle = 'hsl(' + hue + ',85%,' + (35 + y / stripH * 25) + '%)';
-          ctx.fillRect(x, y0 + y, 1, 1);
+          const o = (y * W + x) * 3, so = (y * W + sx) * 3;
+          d[o] = s[so]; d[o + 1] = s[so + 1]; d[o + 2] = s[so + 2];
         }
       }
-      ctx.strokeStyle = '#3a352c';
-      ctx.strokeRect(0.5, 0.5, W - 1, stripH - 1);
-      ctx.beginPath();
-      for (let y = 0; y < stripH; y++) {
-        const px = stripH / 2 + disp(y, t) * 3;
-        if (y === 0) ctx.moveTo(px, y); else ctx.lineTo(px, y);
+    }
+    function draw(b) {
+      const a = data[b];
+      const img = buckets[b].ctx.createImageData(W, H);
+      for (let i = 0; i < W * H; i++) {
+        img.data[i * 4] = a[i * 3]; img.data[i * 4 + 1] = a[i * 3 + 1];
+        img.data[i * 4 + 2] = a[i * 3 + 2]; img.data[i * 4 + 3] = 255;
       }
-      ctx.strokeStyle = '#ffc247';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(255,255,255,.25)';
-      ctx.beginPath(); ctx.moveTo(stripH / 2, 0); ctx.lineTo(stripH / 2, stripH); ctx.stroke();
+      buckets[b].ctx.putImageData(img, 0, 0);
     }
-    function setRo() {
-      ro.set('已叠加 <b>' + layers.length + '</b> 层　时间 t = <b>' + t.toFixed(1) + '</b>' + (playing ? '　播放中' : '　已暂停'));
+    let read = 0, frame = 0, auto = null;
+    api.onCleanup(() => clearInterval(auto));
+    function paint() {
+      draw(0); draw(1);
+      buckets[0].b.classList.remove('read', 'write');
+      buckets[1].b.classList.remove('read', 'write');
+      buckets[read].b.classList.add('read');
+      buckets[1 - read].b.classList.add('write');
     }
-    function tick() {
-      t += 0.25;
-      draw(); setRo();
-      if (layers.length >= 5 && playing) api.win('五层碎浪把彩虹纹搅成了流动的波——多频叠加上手。');
+    const log = api.TU.readout(demoArea);
+    function step() {
+      const w = 1 - read;
+      warp(read, w, frame);
+      logLines.unshift('第 ' + frame + ' 帧：读 桶' + (read ? 'B' : 'A') + ' → 写入 桶' + (w ? 'B' : 'A') + ' → 交换');
+      if (logLines.length > 4) logLines.pop();
+      log.set(logLines.join('<br>'));
+      read = w; frame++;
+      paint();
     }
+    const logLines = [];
 
-    const ctr = api.el('div', 'controls');
-    demoArea.appendChild(ctr);
-    const ro = api.TU.readout(ctr);
-    const bar = api.el('div', 'btnrow add-row');
-    ctr.appendChild(bar);
-    api.TU.button(bar, '＋ 加一层', 'primary', () => {
-      if (layers.length >= 5) { api.toast('叠满 5 层了——真实代码也只叠 6 层就很自然'); return; }
-      addLayer(); draw(); setRo();
-    });
-    api.TU.button(bar, '播放 / 暂停', '', () => {
-      if (playing) { clearInterval(timer); playing = false; }
-      else { timer = setInterval(tick, 90); playing = true; }
-      setRo();
+    const bar = api.el('div', 'btnrow pp-step-row');
+    demoArea.appendChild(bar);
+    api.TU.button(bar, '单步', 'primary', step);
+    api.TU.button(bar, '自动播放', '', function () {
+      if (auto) { clearInterval(auto); auto = null; this.textContent = '自动播放'; }
+      else { auto = setInterval(step, 450); this.textContent = '暂停'; }
     });
     api.TU.button(bar, '重置', '', () => {
-      layers.length = 0; t = 0;
-      if (playing) { clearInterval(timer); playing = false; }
-      draw(); setRo();
+      clearInterval(auto); auto = null;
+      seedInto(0); data[1].fill(0);
+      read = 0; frame = 0; logLines.length = 0;
+      log.set('还没开始');
+      paint();
     });
-    draw(); setRo();
+
+    seedInto(0);
+    paint();
+    log.set('还没开始');
+
+    // 右栏两道题
+    api.quiz([
+      {
+        q: '1. 一块显存为什么不够？',
+        opts: ['容量太小装不下画面', '一边读一边写会读到「写了一半」的乱码', '两个桶颜色更鲜艳'],
+        correct: 1,
+        exp: '写的同时读同一块显存，读到的是改到一半的数据。读写必须分开。',
+      },
+      {
+        q: '2. 每帧结束时屏幕显示哪个桶？',
+        opts: ['刚写好的那一帧', '正在被读的旧桶', '两个桶各显示一半'],
+        correct: 0,
+        exp: '本项目运行器让显示层读「本帧刚写好」的缓冲，写完立刻交换名字。',
+      },
+    ], () => api.win('乒乓循环看懂了：读 A 写 B、帧末交换。'));
   },
   theory: {
     story:
       '<div class="metaphor"><span class="mt">打个比方</span>' +
-      '一层波是抖动的绳子；往起风的湖面连扔四次石头，就是五层波。</div>' +
-      '<p>程序化图形最常用的魔法：<b>简单的东西叠出来，就复杂得像自然</b>。</p>',
+      '两个水桶轮流当「今天的水」和「昨天的水」：每天从昨天桶抽水倒进今天桶，然后俩桶<b>交换名字</b>。</div>' +
+      '<p>所以「读自己上一帧」其实是一对缓冲区在打乒乓。窗口缩放重分配缓冲后，项目会把 iFrame 归零重新播种，否则反馈内容丢失会黑屏。</p>',
     code: {
-      src: 'bufferA.frag 的 D()',
+      src: '本项目运行器 index.html',
       html:
-        '<span class="cm">// v = (振幅, 频率, 时间)，每层 ×(0.45, 2, -1.1)</span>\n' +
-        '<span class="kw">for</span>(<span class="kw">float</span> j = 0.1; j &lt; 0.24; j += 0.02, v *= vec3(0.45, 2, -1.1))\n' +
-        '    r += v.x * <span class="fn">cos</span>(v.y * C + v.z * t + j);',
+        '<span class="fn">gl.bindFramebuffer</span>(gl.FRAMEBUFFER, bufFbo[1 - bufRead]); <span class="cm">// 写：另一个桶</span>\n' +
+        '<span class="fn">gl.bindTexture</span>(gl.TEXTURE0, bufTex[bufRead]); <span class="cm">// 读：当前桶</span>\n' +
+        'bufRead = 1 - bufRead; <span class="cm">// 帧末交换</span>',
     },
   },
-  takeaway: '复杂运动 = 简单波层层叠加（频率×2、振幅×0.45）。项目的水流 D() 就是 6 层波。',
+  takeaway: '自反馈 ≠ 直接改自己：读 A 写 B、帧末交换（ping-pong），才能读到完整旧帧、写出干净新帧。',
 });

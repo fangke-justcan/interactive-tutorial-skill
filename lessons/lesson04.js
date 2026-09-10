@@ -1,98 +1,150 @@
-/* 第 4 关 · 波纹发生器 */
+/* 第 4 关 · 复印自己：反馈循环 */
 LESSONS.push({
-  id: 'stripes',
-  title: '波纹发生器',
-  sub: '一行 sin 公式，画出 k 条条纹',
-  goal: { text: '在竖条纹模式下，调出恰好 6 条暗条纹。', hint: '盯住读数里的计数' },
+  id: 'feedback',
+  title: '复印自己：反馈循环',
+  sub: 'Buffer A 的秘密：每帧拿「上一帧的自己」当底稿',
+  goal: { text: '打开反馈，让帧数 iFrame 跑过 120。', hint: '嫌慢可以把速度拉满 60 帧/秒' },
   notes: [
     {
-      near: '.ctl', title: '你调出的 6 条纹是怎么来的',
-      html: '公式 0.5 + 0.5·sin(u·k·2π)：u 从 0 走到 1，波正好起伏 k 次 → 屏幕上出现 <b>k 条</b>暗纹。你把 k 停在 6，读数当场数了出来。',
+      near: '.fig', title: '反馈关着时为什么静止',
+      html: '每一帧都<b>直接重画种子</b>——画一万帧也一模一样。普通的画就是这样。',
     },
     {
-      near: '.mode-row', title: '喂什么坐标，波就什么形状',
-      html: '斜条纹是把 <b>u+v</b> 喂进去；同心圆是喂「到中心的距离」。函数没变，变的只是坐标。',
+      near: '.feed-row', title: '打开反馈后发生了什么',
+      html: '每帧的底稿换成<b>上一帧的画面</b>，再按双射规则搬一次座位（上一关的双射）。就像复印机复印自己昨天的复印件。',
     },
     {
-      near: '.fig', title: '水流的种子',
-      html: '紫金花那条搬运粒子的「大水流」，底层就是一堆不同密度的 sin/cos 波——下一关教你叠。',
+      near: '.readout', title: '帧数就是时间',
+      html: '演化按<b>帧</b>推进：30 帧内认得出种子，一百多帧搅出流纹，几百帧后变成细颗粒。下一关的时间机器可以逐帧回看全程。',
     },
   ],
   build(demoArea, api) {
-    const W = 320, H = 180;
+    const W = 168, H = 108;
     const fig = api.el('div', 'fig');
     demoArea.appendChild(fig);
     const cv = api.TU.canvas(fig, W, H);
-    cv.style.width = '480px';
+    cv.style.width = '460px';
     const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(W, H);
 
-    let k = 5, pattern = 'v';
-    function val(x, y) {
-      const u = x / W, v = y / H;
-      let p;
-      if (pattern === 'v') p = u;
-      else if (pattern === 'd') p = u + v;
-      else p = Math.hypot(u - 0.5, v - 0.5) * 1.6;
-      return 0.5 + 0.5 * Math.sin(p * k * Math.PI * 2);
-    }
-    function draw() {
-      const img = ctx.createImageData(W, H);
-      const d = img.data;
+    let seedIdx = 0, on = false, frame = 0, amp = 4, speed = 25, timer = null;
+    const seeds = ['彩虹条纹', '圆点阵', '紫金花'];
+    api.onCleanup(() => clearInterval(timer));
+
+    function makeSeed() {
+      const a = new Float32Array(W * H * 3);
       for (let y = 0; y < H; y++)
         for (let x = 0; x < W; x++) {
-          const t = val(x, y);
-          const o = (y * W + x) * 4;
-          d[o] = 18 + 200 * t; d[o + 1] = 12 + 90 * t; d[o + 2] = 30 + 220 * t; d[o + 3] = 255;
+          let c;
+          if (seedIdx === 0) {
+            const hue = x / W;
+            c = [30 + 225 * Math.abs(Math.sin(hue * 9)), 40 + 180 * Math.abs(Math.cos(hue * 6)), 60 + 195 * Math.abs(Math.sin(hue * 12))];
+          } else if (seedIdx === 1) {
+            const gx = x % 16, gy = y % 16;
+            const inDot = Math.hypot(gx - 8, gy - 8) < 6;
+            const hue = (x / W * 4) % 1;
+            c = inDot ? [40 + 215 * hue, 220 - 80 * hue, 255 - 160 * hue] : [8, 6, 14];
+          } else {
+            const fx = x - W / 2, fy = y - H / 2;
+            const r = Math.hypot(fx, fy), th = Math.atan2(fy, fx);
+            const R = TU.flowerR(th, Math.min(W, H) * 0.47);
+            if (r < R) {
+              const cell = Math.floor(x / 3) * 7.3 + Math.floor(y / 3) * 3.1;
+              const h1 = TU.hash21(cell, 1.7);
+              if (h1 < 0.5) c = [170 + 85 * h1, 60 + 60 * h1, 255 - 40 * h1];
+              else c = [20 + 25 * (r / R), 8, 40 + 30 * (r / R)];
+              if (r < Math.min(W, H) * 0.08) c = [255, 189, 38];
+            } else c = [8, 6, 14];
+          }
+          const o = (y * W + x) * 3;
+          a[o] = c[0]; a[o + 1] = c[1]; a[o + 2] = c[2];
         }
+      return a;
+    }
+    let buf = makeSeed();
+    function present() {
+      const d = img.data;
+      for (let i = 0; i < W * H; i++) {
+        d[i * 4] = buf[i * 3]; d[i * 4 + 1] = buf[i * 3 + 1]; d[i * 4 + 2] = buf[i * 3 + 2]; d[i * 4 + 3] = 255;
+      }
       ctx.putImageData(img, 0, 0);
     }
-    function countDark() {
-      let n = 0, inside = false;
-      for (let x = 0; x < W; x++) {
-        const dark = val(x, H / 2) < 0.5;
-        if (dark && !inside) n++;
-        inside = dark;
+    function warp() {
+      const t = frame / 60;
+      const next = new Float32Array(W * H * 3);
+      for (let y = 0; y < H; y++) {
+        const dx = Math.round(amp * Math.sin(y * 0.11 + t * 0.9) + amp * 0.6 * Math.sin(y * 0.037 - t * 0.5));
+        for (let x = 0; x < W; x++) {
+          const sx = ((x - dx) % W + W) % W;
+          const o = (y * W + x) * 3, s = (y * W + sx) * 3;
+          next[o] = buf[s]; next[o + 1] = buf[s + 1]; next[o + 2] = buf[s + 2];
+        }
       }
-      return n;
+      const out = new Float32Array(W * H * 3);
+      for (let x = 0; x < W; x++) {
+        const dy = Math.round(amp * 0.8 * Math.sin(x * 0.09 - t * 0.7));
+        for (let y = 0; y < H; y++) {
+          const sy = ((y - dy) % H + H) % H;
+          const o = (y * W + x) * 3, s = (sy * W + x) * 3;
+          out[o] = next[s]; out[o + 1] = next[s + 1]; out[o + 2] = next[s + 2];
+        }
+      }
+      buf = out;
     }
-    function refresh() {
-      draw();
-      const n = countDark();
-      ro.set('密度 k = <b>' + k + '</b>　|　暗条纹数量：<b>' + n + '</b> 条');
-      if (pattern === 'v' && n === 6) api.win('竖条纹 + k=6：不多不少 6 条暗纹。公式参数和画面一一对应。');
+    function stageName() {
+      if (frame < 30) return '种子期（还认得出原图）';
+      if (frame < 120) return '卷流期（被水流搅动）';
+      if (frame < 400) return '混合期（大理石纹）';
+      return '均匀期（细颗粒）';
     }
+    function tick() {
+      if (on) { warp(); frame++; }
+      else buf = makeSeed();
+      present();
+      ro.innerHTML = '反馈：<b class="' + (on ? 'ok' : 'bad') + '">' + (on ? '开' : '关') + '</b>　帧数 = <b>' + frame + '</b>' +
+        (on ? '<br>阶段：' + stageName() : '<br>（每帧都直接重画种子，永远静止）');
+      if (on && frame >= 120) api.win('画面被「自己复印自己」搬出了新图案。Buffer A 每帧都在做这件事。');
+    }
+    function restart() { clearInterval(timer); timer = setInterval(tick, 1000 / speed); }
 
     const ctr = api.el('div', 'controls');
     demoArea.appendChild(ctr);
     const ro = api.TU.readout(ctr);
-    const bar = api.el('div', 'btnrow mode-row');
+    const bar = api.el('div', 'btnrow feed-row');
     ctr.appendChild(bar);
-    [['v', '竖条纹'], ['d', '斜条纹'], ['r', '同心圆']].forEach(m => {
-      const b = api.TU.button(bar, m[1], 'small', () => {
-        pattern = m[0];
-        bar.querySelectorAll('.btn').forEach(x => x.classList.remove('on'));
-        b.classList.add('on');
-        refresh();
-      });
+    const bOn = api.TU.button(bar, '反馈：关', 'primary', () => {
+      on = !on;
+      bOn.textContent = '反馈：' + (on ? '开' : '关');
+      bOn.classList.toggle('on', on);
+      tick();
     });
-    bar.firstChild.classList.add('on');
+    api.TU.button(bar, '重新播种', '', () => {
+      seedIdx = (seedIdx + 1) % seeds.length;
+      buf = makeSeed(); frame = 0;
+      present(); tick();
+      api.toast('种子换成「' + seeds[seedIdx] + '」，帧数归零');
+    });
     api.TU.slider(ctr, {
-      label: '密度 k（波起伏几次）', min: 0, max: 24, step: 1, value: k,
-      onInput: v => { k = v; refresh(); },
+      label: '剪切力度（每帧最多搬多少像素）', min: 1, max: 8, step: 0.5, value: amp,
+      fmt: v => v + 'px',
+      onInput: v => { amp = v; },
     });
-    refresh();
+    api.TU.slider(ctr, {
+      label: '演化速度', min: 5, max: 60, step: 5, value: speed,
+      fmt: v => v + ' 帧/秒',
+      onInput: v => { speed = v; restart(); },
+    });
+    present(); tick(); restart();
   },
   theory: {
     story:
       '<div class="metaphor"><span class="mt">打个比方</span>' +
-      'sin 是一台<b>波浪窗帘机</b>：你只给一个「密度旋钮」，它就把整块布压出一道道均匀的褶。</div>' +
-      '<p>喂给它的坐标决定褶的方向：u → 竖纹，u+v → 斜纹，距离 r → 同心环。</p>',
+      '一台复印机，你放进去的不是白纸，而是<b>它昨天印的那张纸</b>。每次复印顺手把图案挪一点。一个月后拿到的那张纸，早就看不出原图——变成了层层挪移叠出的大理石纹。</div>' +
+      '<p>这就是 Buffer A 与普通渲染最大的不同：<b>自反馈</b>。种子只播一次，之后的一切都是帧数驱动的连锁复印。</p>',
     code: {
-      src: '着色器惯用写法',
-      html:
-        'float v = 0.5 + 0.5 * <span class="fn">sin</span>(u * k * 6.2832);       <span class="cm">// 竖条纹</span>\n' +
-        'float v3 = 0.5 + 0.5 * <span class="fn">sin</span>(<span class="fn">length</span>(uv - 0.5) * k * 6.2832); <span class="cm">// 同心圆</span>',
+      src: 'bufferA.frag',
+      html: 'result[c] = <span class="fn">texelFetch</span>(iChannel0, <span class="fn">ivec2</span>(p), 0)[c];  <span class="cm">// iChannel0 = 上一帧的自己</span>',
     },
   },
-  takeaway: 'sin(位置 × 频率) = 条纹；喂不同坐标，得到不同方向的波。',
+  takeaway: '自反馈 = 每帧以「上一帧的自己」为底稿再搬一次。种子播一次，演化自己长。',
 });

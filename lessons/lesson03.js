@@ -1,85 +1,134 @@
-/* 第 3 关 · 像素的座位号 UV */
+/* 第 3 关 · 搬座位：双射 */
 LESSONS.push({
-  id: 'uv',
-  title: '像素的座位号 UV',
-  sub: '回答「我在哪」，才有资格回答「我是什么颜色」',
-  goal: { text: '把鼠标移进画布右上角的虚线框。', hint: '读数会提示该往哪边走：u > 0.9 且 v < 0.1' },
+  id: 'bijection',
+  title: '搬座位：双射',
+  sub: 'round 取整 + mod 环绕——项目名里 Bijection 的含义',
+  goal: { text: '用「取整+环绕」搬法，把位移调到 7.5，按一次「搬一次」。', hint: '搬完看读数：颜色种类应该还是 24/24' },
   notes: [
     {
-      near: '.fig', title: '你刚才用的就是 UV',
-      html: '宽度当 <b>0 → 1</b>、高度当 <b>0 → 1</b>：你移动鼠标时，读数一直在做这个换算。右上角那个框，就是 u &gt; 0.9 且 v &lt; 0.1 的区域。',
+      near: '.fig', title: '你刚才那一搬',
+      html: '位移 7.5 被取整成 <b>round(7.5)=8 格</b>：整数平移只换顺序、不产生重叠——所以搬完后颜色依然 24/24。',
     },
     {
-      near: '.ctl', title: '分辨率变了，UV 不变',
-      html: '你拖动滑块把格子变粗变细，图案规律完全一样——<b>UV 与分辨率无关</b>，所以同一份代码在手机和电脑上画出同样的图。',
-      after: 11000,
+      near: '.mode-row', title: '双射 vs 反例',
+      html: '<b>取整+环绕</b>：只换顺序，不丢不重——数学上叫<b>双射（bijection）</b>，项目名里的那个词。<br><b>小数位移+取平均</b>：颜色跟邻居掺和，反复搬就全糊了。',
+    },
+    {
+      near: '.repeat-row', title: '这就是「不衰减」的原因',
+      html: '项目每一帧都用双射搬运，所以粒子被搬几千帧，内容依旧完好——反例搬 300 次就什么都没了。',
     },
   ],
   build(demoArea, api) {
-    const W = 300, H = 200;
+    const N = 24, BS = 15;
     const fig = api.el('div', 'fig');
     demoArea.appendChild(fig);
-    const cv = api.TU.canvas(fig, W, H);
-    cv.style.width = '540px';
+    const cv = api.TU.canvas(fig, N * BS, BS * 2.2);
+    cv.style.width = '420px';
     const ctx = cv.getContext('2d');
 
-    let block = 10;
-    function draw() {
-      for (let y = 0; y < H; y += block)
-        for (let x = 0; x < W; x += block) {
-          const u = (x + block / 2) / W, v = (y + block / 2) / H;
-          ctx.fillStyle = 'rgb(' + (u * 255) + ',' + (v * 255) + ',70)';
-          ctx.fillRect(x, y, block, block);
-        }
-      ctx.strokeStyle = '#ffc247';
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 2;
-      ctx.strokeRect(W * 0.9, 0, W * 0.1 - 1, H * 0.1 - 1);
-      ctx.setLineDash([]);
-      ctx.lineWidth = 1;
+    let cur = makeHues();
+    let mode = 'round', d = 2;
+    function makeHues() {
+      const a = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const c = hsl2rgb(i / N, 0.85, 0.55);
+        a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2];
+      }
+      return a;
     }
-    draw();
+    function hsl2rgb(h, s, l) {
+      const f = n => {
+        const k = (n + h * 12) % 12;
+        return Math.round(255 * (l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+      };
+      return [f(0), f(8), f(4)];
+    }
+    function drawBeads() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      for (let i = 0; i < N; i++) {
+        ctx.fillStyle = 'rgb(' + (cur[i * 3] | 0) + ',' + (cur[i * 3 + 1] | 0) + ',' + (cur[i * 3 + 2] | 0) + ')';
+        ctx.fillRect(i * BS + 1, BS * 0.6, BS - 2, BS - 2);
+      }
+    }
+    const wrap = i => ((i % N) + N) % N;
+    function step(m) {
+      const next = new Float32Array(N * 3);
+      if (m === 'round') {
+        const s = Math.round(d);
+        for (let i = 0; i < N; i++) {
+          const src = wrap(i - s);
+          next[i * 3] = cur[src * 3]; next[i * 3 + 1] = cur[src * 3 + 1]; next[i * 3 + 2] = cur[src * 3 + 2];
+        }
+      } else {
+        for (let i = 0; i < N; i++) {
+          const s = i - d, i0 = Math.floor(s), f = s - i0;
+          const a = wrap(i0), b = wrap(i0 + 1);
+          for (let c = 0; c < 3; c++) next[i * 3 + c] = cur[a * 3 + c] * (1 - f) + cur[b * 3 + c] * f;
+        }
+      }
+      cur = next;
+      drawBeads();
+      report();
+    }
+    function uniq() {
+      const set = new Set();
+      for (let i = 0; i < N; i++)
+        set.add(((cur[i * 3] >> 4) << 8) | ((cur[i * 3 + 1] >> 4) << 4) | (cur[i * 3 + 2] >> 4));
+      return set.size;
+    }
+    function report() {
+      const u = uniq();
+      const good = u === N;
+      ro.innerHTML = '颜色种类：<b class="' + (good ? 'ok' : 'bad') + '">' + u + ' / ' + N + '</b>　' +
+        (good ? '不丢不重，内容完好' : '内容已经被搅糊/弄丢') +
+        '<br>搬法：' + (mode === 'round' ? '取整+环绕（双射）' : '小数位移+取平均（会糊）') +
+        '　位移 d = <b>' + d + '</b>' + (mode === 'round' ? '（round(' + d + ') = ' + Math.round(d) + '）' : '');
+    }
 
     const ctr = api.el('div', 'controls');
     demoArea.appendChild(ctr);
-    api.TU.slider(ctr, {
-      label: '像素大小（分辨率粗糙度）', min: 4, max: 40, step: 2, value: block,
-      fmt: v => v + 'px',
-      onInput: v => { block = v; draw(); },
-    });
     const ro = api.TU.readout(ctr);
-    ro.set('把鼠标移到画布上');
-
-    cv.addEventListener('mousemove', e => {
-      const r = cv.getBoundingClientRect();
-      const x = (e.clientX - r.left) / r.width * W;
-      const y = (e.clientY - r.top) / r.height * H;
-      if (x < 0 || y < 0 || x >= W || y >= H) return;
-      const u = x / W, v = y / H;
-      draw();
-      ctx.strokeStyle = '#fff';
-      ctx.beginPath();
-      ctx.moveTo(x, 0); ctx.lineTo(x, H);
-      ctx.moveTo(0, y); ctx.lineTo(W, y);
-      ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill();
-      let hint = '';
-      if (u <= 0.9) hint += ' → 往右';
-      if (v >= 0.1) hint += ' → 往上';
-      ro.innerHTML = '像素 (' + (x | 0) + ', ' + (y | 0) + ')　→　<b>u = ' + u.toFixed(2) + ', v = ' + v.toFixed(2) + '</b>' + hint;
-      if (u > 0.9 && v < 0.1) api.win('u > 0.9 且 v < 0.1——你把指针放进了右上角的框。百分比座位号到手。');
+    const bar1 = api.el('div', 'btnrow mode-row');
+    ctr.appendChild(bar1);
+    const bRound = api.TU.button(bar1, '取整+环绕（项目的做法）', 'small on', () => {
+      mode = 'round'; bRound.classList.add('on'); bBlur.classList.remove('on'); report();
     });
+    const bBlur = api.TU.button(bar1, '小数位移+取平均（反例）', 'small', () => {
+      mode = 'blur'; bBlur.classList.add('on'); bRound.classList.remove('on');
+      if (Number.isInteger(d)) { d = 0.5; dSlider.set(0.5); }
+      report();
+    });
+    const bar2 = api.el('div', 'btnrow repeat-row');
+    ctr.appendChild(bar2);
+    api.TU.button(bar2, '搬一次', 'primary', () => {
+      step(mode);
+      if (mode === 'round' && Math.abs(d - 7.5) < 1e-9) api.win('位移 7.5 → 实际搬 round(7.5)=8 格：珠子换了一圈座位，颜色依然 24/24。双射！');
+    });
+    api.TU.button(bar2, '反复搬 ×300', '', () => {
+      for (let i = 0; i < 300; i++) step(mode);
+      if (mode === 'round') api.toast('双射搬 300 次依然 24/24：永不衰减');
+      else api.toast('反例搬 300 次：颜色互相掺和全部趋同——不取整的下场');
+    });
+    api.TU.button(bar2, '复原', '', () => { cur = makeHues(); drawBeads(); report(); });
+    const dSlider = api.TU.slider(ctr, {
+      label: '位移 d（可为负、可为小数）', min: -12, max: 12, step: 0.25, value: d,
+      fmt: v => v + ' 格',
+      onInput: v => { d = v; report(); },
+    });
+    drawBeads();
+    report();
   },
   theory: {
     story:
       '<div class="metaphor"><span class="mt">打个比方</span>' +
-      '「7 排 3 座」换算成「横向走 70%、纵向走 30%」——不管电影院多大，这个百分比座位号都成立。</div>' +
-      '<p>所以着色器从不写死「第 300 个像素」，而是写「u = 0.3 的地方」。</p>',
+      '全班按<b>整数个座位整体挪</b>：人数不变、没人挤一座，只是顺序变了——这就是「取整 + 环绕」。<br>' +
+      '而「复印机复印自己的复印件」每 copy 一次糊一点，几百次后什么都没了。</div>' +
+      '<p>项目每一帧的搬运都是双射，所以粒子被搬几千帧后内容依旧完好。</p>',
     code: {
-      src: '着色器惯用写法',
-      html: 'vec2 uv = q / iResolution.xy;   <span class="cm">// u = 横向 0→1，v = 纵向 0→1</span>',
+      src: 'bufferA.frag（原作注释：Shift row or col by a constant, with wrap）',
+      html: 'p[i&amp;1] = <span class="fn">mod</span>(p[i&amp;1] - <span class="fn">round</span>(D(...)), iResolution[i&amp;1]);',
     },
   },
-  takeaway: 'UV = 用 0→1 的百分比表示像素位置，与分辨率无关。',
+  takeaway: 'round 取整 + mod 环绕 = 双射搬运：只换座位，永不重叠、永不丢失。',
 });

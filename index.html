@@ -36,6 +36,8 @@ window.addEventListener('error', function (e) {
 <div id="toast"></div>
 <div id="err"></div>
 <script src="engine.js"></script>
+<!-- 核心七关。扩展关在 lessons-ext/：想加哪关，把它的 <script> 插到想要的位置即可
+     （课程顺序 = script 顺序；建议三关插在 lesson02 之后）。 -->
 <script src="lessons/lesson01.js"></script>
 <script src="lessons/lesson02.js"></script>
 <script src="lessons/lesson03.js"></script>
@@ -43,9 +45,11 @@ window.addEventListener('error', function (e) {
 <script src="lessons/lesson05.js"></script>
 <script src="lessons/lesson06.js"></script>
 <script src="lessons/lesson07.js"></script>
-<script src="lessons/lesson08.js"></script>
-<script src="lessons/lesson09.js"></script>
-<script src="lessons/lesson10.js"></script>
+<!--
+<script src="lessons-ext/ext-uv.js"></script>
+<script src="lessons-ext/ext-stripes.js"></script>
+<script src="lessons-ext/ext-layers.js"></script>
+-->
 <script>Engine.boot();</script>
 </body>
 </html>
